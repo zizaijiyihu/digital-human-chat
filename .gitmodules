@@ -1,0 +1,3 @@
+[submodule "digital-human-component"]
+	path = digital-human-component
+	url = https://github.com/zizaijiyihu/digital-human-component.git

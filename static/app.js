@@ -1,0 +1,718 @@
+// 导入数字人组件（从本地克隆的仓库）
+import { DigitalHuman, parseAudioStream } from '../digital-human-component/src/index.js';
+
+// 全局变量
+let mediaRecorder;
+let recordedChunks = [];
+let avatar = null;
+let audioRecorder;
+let audioChunks = [];
+
+// DOM 元素
+const videoPreview = document.getElementById('videoPreview');
+const requestCameraBtn = document.getElementById('requestCamera');
+const videoCallBtn = document.getElementById('videoCallBtn');
+const recordBtn = document.getElementById('recordBtn');
+const audioRecordBtn = document.getElementById('audioRecordBtn');
+const recordingIndicator = document.getElementById('recordingIndicator');
+const cameraPlaceholder = document.getElementById('cameraPlaceholder');
+const status = document.getElementById('status');
+const chatLog = document.getElementById('chatLog');
+const imageUpload = document.getElementById('imageUpload');
+const imagePreview = document.getElementById('imagePreview');
+const previewImg = document.getElementById('previewImg');
+const clearImageBtn = document.getElementById('clearImage');
+
+// 图片上传相关变量
+let selectedImage = null;
+
+// 视频通话模式相关变量
+let isInVideoCallMode = false;
+let videoCaptureEnabled = false;
+
+// 显示状态消息
+function showStatus(message, type = 'info') {
+    status.textContent = message;
+    status.className = `status active ${type}`;
+    console.log(`[${type.toUpperCase()}] ${message}`);
+}
+
+// 添加对话记录
+function addChatMessage(role, text) {
+    const emptyHint = chatLog.querySelector('.empty-hint');
+    if (emptyHint) {
+        emptyHint.remove();
+    }
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `chat-message ${role}`;
+
+    const roleLabel = role === 'user' ? '👤 您' : '🤖 数字人';
+    messageDiv.innerHTML = `<strong>${roleLabel}</strong><p>${text}</p>`;
+
+    chatLog.appendChild(messageDiv);
+    chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+// 初始化数字人
+async function initAvatar() {
+    try {
+        showStatus('正在加载数字人...', 'info');
+
+        // 创建数字人（零配置！）
+        avatar = new DigitalHuman({
+            container: '#avatar',
+            autoStart: 'listening',  // 自动开始聆听模式
+
+            // 事件回调
+            onReady: () => {
+                showStatus('数字人已就绪！', 'success');
+                console.log('✅ 数字人加载完成');
+            },
+
+            onSpeakStart: () => {
+                console.log('🗣️ 数字人开始说话');
+            },
+
+            onSpeakEnd: () => {
+                console.log('✅ 数字人说话结束');
+                // 说话结束后返回聆听模式
+                avatar.startListening();
+            },
+
+            onListenStart: () => {
+                console.log('👂 数字人进入聆听模式');
+            },
+
+            onError: (error) => {
+                console.error('❌ 数字人错误:', error);
+                showStatus('数字人加载失败: ' + error.message, 'error');
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ 初始化数字人失败:', error);
+        showStatus('初始化数字人失败: ' + error.message, 'error');
+    }
+}
+
+// 初始化摄像头
+async function initCamera() {
+    try {
+        showStatus('正在请求摄像头权限...', 'info');
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 1280, height: 720 },
+            audio: true
+        });
+
+        videoPreview.srcObject = stream;
+
+        // 隐藏占位符和请求按钮
+        cameraPlaceholder.style.display = 'none';
+        requestCameraBtn.style.display = 'none';
+
+        // 显示录制按钮并启用
+        recordBtn.style.display = 'inline-block';
+        recordBtn.disabled = false;
+
+        showStatus('摄像头已就绪，按住按钮开始录制', 'success');
+
+    } catch (error) {
+        console.error('❌ 摄像头错误:', error);
+        showStatus('无法访问摄像头: ' + error.message, 'error');
+    }
+}
+
+// 开始录制
+function startRecording() {
+    try {
+        recordedChunks = [];
+        const stream = videoPreview.srcObject;
+
+        mediaRecorder = new MediaRecorder(stream, {
+            mimeType: 'video/webm;codecs=vp8,opus'
+        });
+
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                recordedChunks.push(event.data);
+            }
+        };
+
+        mediaRecorder.onstop = () => {
+            sendVideo();
+        };
+
+        mediaRecorder.start();
+        recordingIndicator.style.display = 'block';
+        showStatus('正在录制...', 'info');
+
+    } catch (error) {
+        console.error('❌ 录制错误:', error);
+        showStatus('录制失败: ' + error.message, 'error');
+    }
+}
+
+// 停止录制
+function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+        recordingIndicator.style.display = 'none';
+        showStatus('正在发送视频...', 'info');
+    }
+}
+
+// 发送视频
+async function sendVideo() {
+    if (recordedChunks.length === 0) {
+        showStatus('没有录制内容', 'error');
+        return;
+    }
+
+    try {
+        const blob = new Blob(recordedChunks, { type: 'video/webm' });
+        console.log('📹 视频大小:', blob.size, 'bytes');
+
+        const formData = new FormData();
+        formData.append('video', blob, 'recording.webm');
+
+        showStatus('正在上传并处理...', 'info');
+        addChatMessage('user', '(已发送视频)');
+
+        const response = await fetch('/api/chat', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error(`请求失败: ${response.status}`);
+        }
+
+        const result = await response.json();
+        console.log('✅ 响应:', result);
+
+        if (result.success) {
+            const text = result.text || '(无文字回复)';
+            addChatMessage('avatar', text);
+
+            if (result.hasAudio && result.audio) {
+                // 解码音频
+                const audioData = Uint8Array.from(atob(result.audio), c => c.charCodeAt(0));
+                const audioFormat = result.audioFormat || 'wav';
+                const audioBlob = new Blob([audioData], { type: `audio/${audioFormat}` });
+
+                // 播放音频（驱动数字人说话）
+                if (avatar) {
+                    avatar.speak(audioBlob);
+                } else {
+                    console.warn('⚠️ 数字人未初始化');
+                }
+
+                showStatus('数字人正在说话...', 'success');
+            } else {
+                showStatus('收到回复（无音频）', 'success');
+            }
+        } else {
+            throw new Error(result.error || '未知错误');
+        }
+
+    } catch (error) {
+        console.error('❌ 发送失败:', error);
+        showStatus('发送失败: ' + error.message, 'error');
+    }
+}
+
+// 开始音频录制
+async function startAudioRecording() {
+    try {
+        audioChunks = [];
+
+        // 请求麦克风权限
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: true
+        });
+
+        audioRecorder = new MediaRecorder(stream, {
+            mimeType: 'audio/webm;codecs=opus'
+        });
+
+        audioRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                audioChunks.push(event.data);
+            }
+        };
+
+        audioRecorder.onstop = () => {
+            sendAudio();
+            // 停止音频流
+            stream.getTracks().forEach(track => track.stop());
+        };
+
+        audioRecorder.start();
+        recordingIndicator.style.display = 'block';
+        showStatus('正在录制音频...', 'info');
+
+    } catch (error) {
+        console.error('❌ 音频录制错误:', error);
+        showStatus('无法访问麦克风: ' + error.message, 'error');
+    }
+}
+
+// 停止音频录制
+function stopAudioRecording() {
+    if (audioRecorder && audioRecorder.state !== 'inactive') {
+        audioRecorder.stop();
+        recordingIndicator.style.display = 'none';
+        showStatus('正在发送音频...', 'info');
+    }
+}
+
+// 发送音频（流式版本）
+async function sendAudio() {
+    if (audioChunks.length === 0) {
+        showStatus('没有录制内容', 'error');
+        return;
+    }
+
+    try {
+        const blob = new Blob(audioChunks, { type: 'audio/webm' });
+        console.log('🎤 音频大小:', blob.size, 'bytes');
+
+        const formData = new FormData();
+        formData.append('audio', blob, 'recording.webm');
+
+        showStatus('正在上传并处理...', 'info');
+        addChatMessage('user', '(已发送音频)');
+
+        // 使用流式 API
+        const response = await fetch('/api/audio-chat-streaming', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error(`请求失败: ${response.status}`);
+        }
+
+        console.log('✅ 开始接收流式音频');
+        showStatus('数字人正在说话...', 'success');
+
+        // 创建音频流生成器（原始 HTTP 流）
+        async function* rawAudioStream() {
+            const reader = response.body.getReader();
+            let chunkCount = 0;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                    console.log(`✅ 流式接收完成，共 ${chunkCount} 个片段`);
+                    break;
+                }
+
+                chunkCount++;
+                console.log(`🔊 收到 HTTP 片段 #${chunkCount}:`, value.byteLength, 'bytes');
+
+                // 返回 ArrayBuffer
+                yield value.buffer;
+            }
+        }
+
+        // ✅ 使用 parseAudioStream 包装，解决 HTTP 分块问题
+        const parsedStream = parseAudioStream(rawAudioStream());
+
+        // 使用数字人的流式播放功能
+        if (avatar) {
+            const controller = await avatar.speakStreaming({
+                audioStream: parsedStream,
+                onChunkReceived: (chunk) => {
+                    console.log('🎵 开始播放音频片段:', chunk.byteLength, 'bytes');
+                },
+                onStreamEnd: () => {
+                    console.log('✅ 数字人说话完成');
+                    showStatus('对话完成', 'success');
+                }
+            });
+
+            console.log('🎙️ 流式播放已启动');
+        } else {
+            console.warn('⚠️ 数字人未初始化');
+            showStatus('数字人未初始化', 'error');
+        }
+
+    } catch (error) {
+        console.error('❌ 发送失败:', error);
+        showStatus('发送失败: ' + error.message, 'error');
+    }
+}
+
+// 事件监听
+requestCameraBtn.addEventListener('click', initCamera);
+
+// 视频录制：按住录制，松开发送
+recordBtn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    startRecording();
+});
+
+recordBtn.addEventListener('pointerup', (e) => {
+    e.preventDefault();
+    stopRecording();
+});
+
+recordBtn.addEventListener('pointerleave', (e) => {
+    // 如果正在录制时鼠标离开，也停止录制
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+        stopRecording();
+    }
+});
+
+// 防止触摸设备上的默认行为
+recordBtn.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+}, { passive: false });
+
+// 音频录制：按住录制，松开发送
+audioRecordBtn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    startAudioRecording();
+});
+
+audioRecordBtn.addEventListener('pointerup', (e) => {
+    e.preventDefault();
+    stopAudioRecording();
+});
+
+audioRecordBtn.addEventListener('pointerleave', (e) => {
+    // 如果正在录制时鼠标离开，也停止录制
+    if (audioRecorder && audioRecorder.state === 'recording') {
+        stopAudioRecording();
+    }
+});
+
+// 防止触摸设备上的默认行为
+audioRecordBtn.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+}, { passive: false });
+
+// 图片上传事件
+imageUpload.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) {
+        handleImageUpload(file);
+    }
+});
+
+// 清除图片按钮
+clearImageBtn.addEventListener('click', () => {
+    selectedImage = null;
+    imagePreview.style.display = 'none';
+    previewImg.src = '';
+    imageUpload.value = '';
+});
+
+// 处理图片上传
+async function handleImageUpload(file) {
+    try {
+        showStatus('正在处理图片...', 'info');
+
+        // 显示预览
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            previewImg.src = e.target.result;
+            imagePreview.style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+
+        // 保存图片用于发送
+        selectedImage = file;
+
+        showStatus('图片已上传，正在请求大模型点评...', 'info');
+
+        // 立即发送图片给大模型点评
+        await sendImageForCommentary(file);
+
+    } catch (error) {
+        console.error('❌ 图片上传失败:', error);
+        showStatus('图片上传失败: ' + error.message, 'error');
+    }
+}
+
+// 发送图片给大模型点评（流式返回）
+async function sendImageForCommentary(imageFile) {
+    try {
+        showStatus('正在请求大模型点评...', 'info');
+
+        // 准备表单数据
+        const formData = new FormData();
+        formData.append('image', imageFile);
+
+        // 发送请求（流式接口）
+        const response = await fetch('/api/image-commentary-streaming', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        showStatus('正在接收大模型点评（流式）...', 'info');
+
+        // 创建音频流生成器（原始 HTTP 流）
+        async function* rawAudioStream() {
+            const reader = response.body.getReader();
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                yield value.buffer;  // 返回 ArrayBuffer
+            }
+        }
+
+        // ✅ 使用 parseAudioStream 包装，解决 HTTP 分块问题
+        const parsedStream = parseAudioStream(rawAudioStream());
+
+        // 使用流式播放
+        const controller = await avatar.speakStreaming({
+            audioStream: parsedStream,
+            onChunkReceived: (chunk) => {
+                console.log('🎵 开始播放音频片段:', chunk.byteLength);
+            },
+            onStreamEnd: () => {
+                console.log('✅ 数字人说话完成');
+                showStatus('大模型点评完成！', 'success');
+                addChatMessage('avatar', '（已对图片进行点评）');
+            }
+        });
+
+        addChatMessage('user', '📷 上传了一张图片');
+
+    } catch (error) {
+        console.error('❌ 发送图片失败:', error);
+        showStatus('发送失败: ' + error.message, 'error');
+    }
+}
+
+// 视频通话模式切换
+async function toggleVideoCallMode() {
+    try {
+        console.log('🔧 [DEBUG] toggleVideoCallMode 被调用');
+        console.log('🔧 [DEBUG] 当前状态 isInVideoCallMode:', isInVideoCallMode);
+        console.log('🔧 [DEBUG] avatar 对象:', avatar);
+
+        if (!isInVideoCallMode) {
+            // 进入视频通话模式
+            console.log('📹 [INFO] 准备进入视频通话模式');
+            showStatus('正在请求摄像头和麦克风权限...', 'info');
+
+            console.log('🔧 [DEBUG] 检查 avatar.enterVideoCallMode 方法:', typeof avatar.enterVideoCallMode);
+
+            if (!avatar.enterVideoCallMode) {
+                throw new Error('avatar.enterVideoCallMode 方法不存在，请检查 digital-human-component 版本');
+            }
+
+            // 进入视频通话模式（会自动请求摄像头和麦克风权限）
+            console.log('🔧 [DEBUG] 调用 avatar.enterVideoCallMode...');
+            await avatar.enterVideoCallMode({
+                pipPosition: 'bottom-right',
+                pipScale: 0.25,
+                showLocalVideo: true,
+                showAudioVisualizer: true
+            });
+
+            console.log('✅ [SUCCESS] enterVideoCallMode 调用成功');
+
+            // 启动视频自动采集
+            console.log('🔧 [DEBUG] 调用 avatar.enableVideoAutoCapture...');
+            await avatar.enableVideoAutoCapture({
+                // 视频录制配置
+                maxGroups: 2,                   // 保留 2 组背景视频
+                groupDuration: 5000,            // 每组 5 秒
+                maxRecordDuration: 60000,       // 最长录制 60 秒
+
+                // VAD 基础配置（使用最新的默认值）
+                speechThreshold: 30,            // 基础阈值（默认 30）
+                silenceDuration: 2000,          // 静音 2 秒后停止录制
+                minSpeakDuration: 900,          // 最小说话时长 900ms（过滤短声音）
+
+                // VAD 高级配置（使用默认值即可，系统会自动校准）
+                calibrationDuration: 3000,      // 校准时长 3 秒
+                noiseUpdateInterval: 10000,     // 每 10 秒更新背景噪音
+                minThreshold: 20,               // 动态阈值最小值（避免在安静环境下误触发）
+                lowThresholdMultiplier: 1.5,    // 预激活阈值倍数
+                highThresholdMultiplier: 3.0,   // 确认说话阈值倍数
+
+                onVideoCapture: handleVideoCapture,
+
+                onSpeechStart: () => {
+                    console.log('🎤 [INFO] 检测到说话开始');
+                    showStatus('正在录制...', 'info');
+                },
+
+                onSpeechEnd: () => {
+                    console.log('🤐 [INFO] 说话结束');
+                },
+
+                onError: (error) => {
+                    console.error('❌ [ERROR] 视频自动采集错误:', error);
+                    showStatus('采集错误: ' + error.message, 'error');
+                }
+            });
+
+            console.log('✅ [SUCCESS] enableVideoAutoCapture 调用成功');
+            isInVideoCallMode = true;
+            videoCallBtn.textContent = '⏹️ 退出视频通话';
+            videoCallBtn.classList.add('active');
+            showStatus('已进入视频通话模式，开始自动监听...', 'success');
+
+        } else {
+            // 退出视频通话模式
+            console.log('⏹️ [INFO] 退出视频通话模式');
+
+            // 先停止视频自动采集
+            console.log('🔧 [DEBUG] 调用 avatar.disableVideoAutoCapture...');
+            if (avatar.disableVideoAutoCapture) {
+                avatar.disableVideoAutoCapture();
+                console.log('✅ [SUCCESS] 已停止视频自动采集');
+            }
+
+            console.log('🔧 [DEBUG] 检查 avatar.exitVideoCallMode 方法:', typeof avatar.exitVideoCallMode);
+
+            if (!avatar.exitVideoCallMode) {
+                throw new Error('avatar.exitVideoCallMode 方法不存在');
+            }
+
+            avatar.exitVideoCallMode();
+
+            console.log('✅ [SUCCESS] exitVideoCallMode 调用成功');
+            isInVideoCallMode = false;
+            videoCallBtn.textContent = '📹 进入视频通话';
+            videoCallBtn.classList.remove('active');
+            showStatus('已退出视频通话模式', 'info');
+        }
+    } catch (error) {
+        console.error('❌ [ERROR] 切换视频通话模式失败:', error);
+        console.error('❌ [ERROR] 错误堆栈:', error.stack);
+        showStatus('切换失败: ' + error.message, 'error');
+    }
+}
+
+// 处理视频自动采集（新版：接收视频组数组）
+async function handleVideoCapture(videoGroups) {
+    try {
+        console.log('🎬 [DEBUG] ========== handleVideoCapture 被调用 ==========');
+        console.log(`🎬 [DEBUG] 收到 ${videoGroups.length} 个视频组`);
+
+        if (!videoGroups || videoGroups.length === 0) {
+            console.warn('⚠️ [WARN] 没有视频组');
+            return;
+        }
+
+        // 打印每个视频组的详细信息
+        videoGroups.forEach((group, index) => {
+            console.log(`🎬 [DEBUG] 视频组 ${index + 1}:`, {
+                type: group.type,
+                duration: `${(group.duration / 1000).toFixed(1)}s`,
+                size: `${(group.size / 1024 / 1024).toFixed(2)} MB`,
+                startTime: new Date(group.startTime).toLocaleTimeString(),
+                endTime: new Date(group.endTime).toLocaleTimeString()
+            });
+        });
+
+        // 计算总时长
+        const totalDuration = videoGroups.reduce((sum, g) => sum + g.duration, 0);
+        console.log(`📊 [INFO] 总时长: ${(totalDuration / 1000).toFixed(1)} 秒`);
+
+        showStatus('正在处理视频并发送...', 'info');
+        addChatMessage('user', `(自动采集 ${videoGroups.length} 个视频组，共 ${(totalDuration / 1000).toFixed(1)}秒)`);
+
+        // 创建 FormData，发送所有视频组
+        const formData = new FormData();
+
+        if (videoGroups.length > 1) {
+            console.log(`🔀 [INFO] 多个视频组（${videoGroups.length} 个），将在后端合并`);
+            videoGroups.forEach((group, index) => {
+                console.log(`🎬 [DEBUG] 添加视频组 ${index + 1} 到 FormData`);
+                formData.append('videos', group.blob, `video-${index + 1}-${group.type}.webm`);
+            });
+        } else {
+            console.log('📹 [INFO] 单个视频组，直接发送');
+            formData.append('videos', videoGroups[0].blob, 'video.webm');
+        }
+
+        // 调用视频对话 API
+        console.log('🌐 [DEBUG] 准备发送 POST 请求到 /api/video-auto-chat');
+
+        const response = await fetch('/api/video-auto-chat', {
+            method: 'POST',
+            body: formData
+        });
+
+        console.log('🌐 [DEBUG] 收到响应，状态码:', response.status);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('❌ [ERROR] 请求失败:', response.status, errorText);
+            throw new Error(`请求失败: ${response.status} - ${errorText}`);
+        }
+
+        console.log('✅ 开始接收流式音频');
+        showStatus('数字人正在说话...', 'success');
+
+        // 创建音频流生成器（原始 HTTP 流）
+        async function* rawAudioStream() {
+            const reader = response.body.getReader();
+            let chunkCount = 0;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                    console.log(`✅ 流式接收完成，共 ${chunkCount} 个片段`);
+                    break;
+                }
+
+                chunkCount++;
+                console.log(`🔊 收到 HTTP 片段 #${chunkCount}:`, value.byteLength, 'bytes');
+
+                // 返回 ArrayBuffer
+                yield value.buffer;
+            }
+        }
+
+        // 使用 parseAudioStream 包装，解决 HTTP 分块问题
+        const parsedStream = parseAudioStream(rawAudioStream());
+
+        // 使用数字人的流式播放功能
+        if (avatar) {
+            await avatar.speakStreaming({
+                audioStream: parsedStream,
+                onChunkReceived: (chunk) => {
+                    console.log('🎵 开始播放音频片段:', chunk.byteLength, 'bytes');
+                },
+                onStreamEnd: () => {
+                    console.log('✅ 数字人说话完成');
+                    showStatus('对话完成', 'success');
+                    addChatMessage('avatar', '(已回复视频内容)');
+                }
+            });
+
+            console.log('🎙️ 流式播放已启动');
+        } else {
+            console.warn('⚠️ 数字人未初始化');
+            showStatus('数字人未初始化', 'error');
+        }
+
+    } catch (error) {
+        console.error('❌ 处理视频采集失败:', error);
+        showStatus('处理失败: ' + error.message, 'error');
+    }
+}
+
+// 视频通话按钮事件
+videoCallBtn.addEventListener('click', toggleVideoCallMode);
+
+// 页面加载时初始化数字人
+window.addEventListener('load', () => {
+    console.log('🚀 数字人对话系统已加载');
+    initAvatar();
+});

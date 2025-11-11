@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数字人对话</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 数字人对话系统</h1>
+
+        <div class="main-content">
+            <!-- 左侧：摄像头区域 -->
+            <div class="video-section">
+                <h2>📹 您的视频</h2>
+                <div class="video-container">
+                    <video id="videoPreview" autoplay muted playsinline></video>
+                    <div id="cameraPlaceholder" class="camera-placeholder">
+                        <p>请点击下方按钮开启摄像头</p>
+                    </div>
+                </div>
+                <div class="controls">
+                    <button id="requestCamera" class="btn btn-primary">📷 开启摄像头</button>
+                    <button id="videoCallBtn" class="btn btn-video-call">
+                        📹 进入视频通话
+                    </button>
+                    <button id="recordBtn" class="btn btn-record" style="display:none;" disabled>
+                        🎙️ 按住说话（视频）
+                    </button>
+                    <button id="audioRecordBtn" class="btn btn-audio-record">
+                        🎤 按住说话（音频）
+                    </button>
+                    <label for="imageUpload" class="btn btn-image-upload">
+                        🖼️ 上传图片点评
+                        <input type="file" id="imageUpload" accept="image/*" style="display:none;">
+                    </label>
+                </div>
+                <div id="imagePreview" class="image-preview" style="display:none;">
+                    <img id="previewImg" src="" alt="预览图片">
+                    <button id="clearImage" class="btn-clear">✕</button>
+                </div>
+                <div id="recordingIndicator" class="recording-indicator" style="display:none;">
+                    🔴 录制中...
+                </div>
+                <div id="status" class="status"></div>
+            </div>
+
+            <!-- 右侧：数字人区域 -->
+            <div class="avatar-section">
+                <h2>👤 数字人</h2>
+                <div id="avatar" class="avatar-container"></div>
+            </div>
+        </div>
+
+        <!-- 对话历史 -->
+        <div class="chat-history">
+            <h2>💬 对话记录</h2>
+            <div id="chatLog" class="chat-log">
+                <p class="empty-hint">开始对话后，对话记录将显示在这里</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import Map for Three.js -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module" src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 虚拟环境
+venv/
+env/
+ENV/
+.venv
+
+# 环境变量文件
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 测试和临时文件
+test/audios/*
+!test/audios/.gitkeep
+test/videos/*
+!test/videos/.gitkeep
+*.tmp
+*.log
+
+# 数字人组件 (使用 git submodule)
+# 如果不使用 submodule，则不需要忽略
+# digital-human-component/
