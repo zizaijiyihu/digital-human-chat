@@ -8,6 +8,58 @@ let avatar = null;
 let audioRecorder;
 let audioChunks = [];
 
+// 会话管理
+let currentSessionId = generateSessionId();
+
+// 生成会话 ID
+function generateSessionId() {
+    return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// 创建新会话
+function createNewSession() {
+    currentSessionId = generateSessionId();
+    console.log('✅ 创建新会话:', currentSessionId);
+
+    // 清空聊天记录 UI
+    const chatLog = document.getElementById('chatLog');
+    chatLog.innerHTML = '<div class="empty-hint">暂无对话记录</div>';
+
+    showStatus('已创建新会话', 'success');
+}
+
+// 清空当前会话历史
+async function clearCurrentSession() {
+    try {
+        const response = await fetch('/api/conversation/clear', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                session_id: currentSessionId
+            })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            console.log('✅ 会话历史已清空');
+
+            // 清空聊天记录 UI
+            const chatLog = document.getElementById('chatLog');
+            chatLog.innerHTML = '<div class="empty-hint">暂无对话记录</div>';
+
+            showStatus('会话历史已清空', 'success');
+        } else {
+            console.error('清空会话历史失败:', data.error);
+            showStatus('清空失败', 'error');
+        }
+    } catch (error) {
+        console.error('清空会话历史失败:', error);
+        showStatus('清空失败', 'error');
+    }
+}
+
 // DOM 元素
 const videoPreview = document.getElementById('videoPreview');
 const requestCameraBtn = document.getElementById('requestCamera');
@@ -629,6 +681,10 @@ async function handleVideoCapture(videoGroups) {
         // 创建 FormData，发送所有视频组
         const formData = new FormData();
 
+        // 添加会话 ID
+        formData.append('session_id', currentSessionId);
+        console.log('🔑 [DEBUG] 会话 ID:', currentSessionId);
+
         if (videoGroups.length > 1) {
             console.log(`🔀 [INFO] 多个视频组（${videoGroups.length} 个），将在后端合并`);
             videoGroups.forEach((group, index) => {
@@ -921,8 +977,25 @@ settingsModal.addEventListener('click', (e) => {
 // 视频通话按钮事件
 videoCallBtn.addEventListener('click', toggleVideoCallMode);
 
+// 会话管理按钮事件
+const newSessionBtn = document.getElementById('newSessionBtn');
+const clearSessionBtn = document.getElementById('clearSessionBtn');
+
+newSessionBtn.addEventListener('click', () => {
+    if (confirm('确定创建新会话吗？当前会话将保留在历史记录中。')) {
+        createNewSession();
+    }
+});
+
+clearSessionBtn.addEventListener('click', () => {
+    if (confirm('确定清空当前会话的对话历史吗？此操作不可恢复。')) {
+        clearCurrentSession();
+    }
+});
+
 // 页面加载时初始化数字人
 window.addEventListener('load', () => {
     console.log('🚀 数字人对话系统已加载');
+    console.log('🔑 当前会话 ID:', currentSessionId);
     initAvatar();
 });

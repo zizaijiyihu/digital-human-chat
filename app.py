@@ -65,6 +65,36 @@ latest_videos = {
     'timestamp': None
 }
 
+# 对话历史管理（内存存储，简单实现）
+# 生产环境应该使用 Redis 或数据库
+conversation_history = {}  # {session_id: [messages]}
+
+def get_conversation_history(session_id):
+    """获取会话的对话历史"""
+    if session_id not in conversation_history:
+        conversation_history[session_id] = []
+    return conversation_history[session_id]
+
+def add_to_conversation_history(session_id, role, content):
+    """添加一条消息到对话历史"""
+    if session_id not in conversation_history:
+        conversation_history[session_id] = []
+
+    conversation_history[session_id].append({
+        'role': role,
+        'content': content
+    })
+
+    # 限制历史长度（保留最近 20 条，避免 token 过多）
+    MAX_HISTORY = 20
+    if len(conversation_history[session_id]) > MAX_HISTORY:
+        conversation_history[session_id] = conversation_history[session_id][-MAX_HISTORY:]
+
+def clear_conversation_history(session_id):
+    """清空会话的对话历史"""
+    if session_id in conversation_history:
+        conversation_history[session_id] = []
+
 
 def convert_webm_to_mp4(webm_data):
     """将 WebM 视频转换为 MP4 格式"""
@@ -1033,11 +1063,20 @@ def video_auto_chat_with_tts():
     """
     视频理解 + 流式 TTS 合成
     分离式架构：视频理解（纯文本）+ Qwen3-TTS 流式合成
+    支持多轮对话（通过 session_id）
     """
     try:
         print('\n' + '='*80)
         print('🎯 收到视频理解 + 流式 TTS 请求')
         print('='*80)
+
+        # 0. 获取会话 ID（用于对话历史管理）
+        session_id = request.form.get('session_id', 'default')
+        print(f'🔑 会话 ID: {session_id}')
+
+        # 获取当前会话的历史对话
+        history = get_conversation_history(session_id)
+        print(f'📚 当前会话历史: {len(history)} 条消息')
 
         # 1. 获取并合并视频片段（复用现有逻辑）
         video_files = request.files.getlist('videos')
@@ -1126,22 +1165,32 @@ def video_auto_chat_with_tts():
 
         print('⏳ 步骤 1: 调用 Qwen3-Omni-Flash 进行视频理解（纯文本模式）...')
 
+        # 构建完整的消息列表：系统提示词 + 历史对话 + 当前视频
+        messages = [
+            {'role': 'system', 'content': system_prompt}
+        ]
+
+        # 添加历史对话
+        messages.extend(history)
+
+        # 添加当前用户视频
+        messages.append({
+            'role': 'user',
+            'content': [
+                {
+                    'type': 'video_url',
+                    'video_url': {'url': f'data:{video_mime};base64,{video_base64}'}
+                }
+            ]
+        })
+
+        print(f'📨 完整消息列表: 1 条系统提示词 + {len(history)} 条历史对话 + 1 条当前视频')
+
         # 注意：虽然我们可以用 stream=True，但因为需要解析完整 JSON 才能提取 message 和 actions，
         # 所以实际上还是需要等待完整响应。使用 stream=False 更简单直接。
         understanding_response = client.chat.completions.create(
             model=MODEL,
-            messages=[
-                {'role': 'system', 'content': system_prompt},
-                {
-                    'role': 'user',
-                    'content': [
-                        {
-                            'type': 'video_url',
-                            'video_url': {'url': f'data:{video_mime};base64,{video_base64}'}
-                        }
-                    ]
-                }
-            ],
+            messages=messages,
             modalities=['text'],  # 只要文本！
             stream=False  # 需要完整 JSON 才能解析 message 和 actions
         )
@@ -1163,6 +1212,13 @@ def video_auto_chat_with_tts():
                 print(f'📋 解析到的 actions: {actions}')
         except json.JSONDecodeError:
             print('📝 响应不是 JSON 格式，直接使用文本')
+
+        # 💾 保存对话历史
+        # 注意：用户消息存储为文本摘要（"用户上传了视频"），而不是完整视频 base64
+        # 因为视频数据太大，不适合存储在内存中
+        add_to_conversation_history(session_id, 'user', '用户上传了视频片段')
+        add_to_conversation_history(session_id, 'assistant', text_response)
+        print(f'💾 已保存对话历史，当前会话共 {len(get_conversation_history(session_id))} 条消息')
 
         # 3. 流式 TTS 合成
         print(f'\n⏳ 步骤 2: 调用 Qwen3-TTS-Flash 进行流式音频合成...')
@@ -1309,6 +1365,61 @@ def get_latest_videos():
     }
 
     return jsonify(result)
+
+
+@app.route('/api/conversation/history', methods=['GET'])
+def get_conversation_history_api():
+    """获取会话的对话历史"""
+    session_id = request.args.get('session_id', 'default')
+    history = get_conversation_history(session_id)
+
+    return jsonify({
+        'success': True,
+        'session_id': session_id,
+        'count': len(history),
+        'history': history
+    })
+
+
+@app.route('/api/conversation/clear', methods=['POST'])
+def clear_conversation_history_api():
+    """清空会话的对话历史"""
+    try:
+        data = request.get_json()
+        session_id = data.get('session_id', 'default')
+
+        clear_conversation_history(session_id)
+        print(f'✅ 已清空会话 {session_id} 的对话历史')
+
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'message': '对话历史已清空'
+        })
+    except Exception as e:
+        print(f'❌ 清空对话历史失败: {e}')
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/conversation/sessions', methods=['GET'])
+def get_all_sessions():
+    """获取所有会话列表"""
+    sessions = []
+    for session_id, history in conversation_history.items():
+        sessions.append({
+            'session_id': session_id,
+            'message_count': len(history),
+            'last_update': 'N/A'  # 可以后续添加时间戳
+        })
+
+    return jsonify({
+        'success': True,
+        'count': len(sessions),
+        'sessions': sessions
+    })
 
 
 if __name__ == '__main__':

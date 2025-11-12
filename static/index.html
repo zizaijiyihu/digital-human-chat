@@ -58,7 +58,17 @@
 
         <!-- 对话历史 -->
         <div class="chat-history">
-            <h2>💬 对话记录</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h2>💬 对话记录</h2>
+                <div class="session-controls">
+                    <button id="newSessionBtn" class="btn btn-session" title="创建新会话">
+                        ➕ 新会话
+                    </button>
+                    <button id="clearSessionBtn" class="btn btn-session" title="清空当前会话历史">
+                        🗑️ 清空历史
+                    </button>
+                </div>
+            </div>
             <div id="chatLog" class="chat-log">
                 <p class="empty-hint">开始对话后，对话记录将显示在这里</p>
             </div>
