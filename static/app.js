@@ -681,25 +681,22 @@ async function handleVideoCapture(videoGroups) {
         // 创建 FormData，发送所有视频组
         const formData = new FormData();
 
-        // 添加会话 ID
+        // 添加会话 ID 和学生 ID
         formData.append('session_id', currentSessionId);
+        formData.append('student_id', 'student_001');  // 默认学生 ID，后续可改为动态选择
         console.log('🔑 [DEBUG] 会话 ID:', currentSessionId);
+        console.log('👤 [DEBUG] 学生 ID: student_001');
 
-        if (videoGroups.length > 1) {
-            console.log(`🔀 [INFO] 多个视频组（${videoGroups.length} 个），将在后端合并`);
-            videoGroups.forEach((group, index) => {
-                console.log(`🎬 [DEBUG] 添加视频组 ${index + 1} 到 FormData`);
-                formData.append('videos', group.blob, `video-${index + 1}-${group.type}.webm`);
-            });
-        } else {
-            console.log('📹 [INFO] 单个视频组，直接发送');
-            formData.append('videos', videoGroups[0].blob, 'video.webm');
+        // 只发送第一个视频组（Agent API 只接受单个视频）
+        if (videoGroups.length > 0) {
+            console.log('📹 [INFO] 发送视频到 Agent API');
+            formData.append('video', videoGroups[0].blob, 'video.webm');
         }
 
-        // 调用新的流式 TTS API
-        console.log('🌐 [DEBUG] 准备发送 POST 请求到 /api/video-auto-chat-with-tts');
+        // 调用新的 Agent 聊天 API
+        console.log('🌐 [DEBUG] 准备发送 POST 请求到 /api/chat');
 
-        const response = await fetch('/api/video-auto-chat-with-tts', {
+        const response = await fetch('/api/chat', {
             method: 'POST',
             body: formData
         });
