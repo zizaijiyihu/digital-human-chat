@@ -1126,6 +1126,8 @@ def video_auto_chat_with_tts():
 
         print('⏳ 步骤 1: 调用 Qwen3-Omni-Flash 进行视频理解（纯文本模式）...')
 
+        # 注意：虽然我们可以用 stream=True，但因为需要解析完整 JSON 才能提取 message 和 actions，
+        # 所以实际上还是需要等待完整响应。使用 stream=False 更简单直接。
         understanding_response = client.chat.completions.create(
             model=MODEL,
             messages=[
@@ -1141,12 +1143,13 @@ def video_auto_chat_with_tts():
                 }
             ],
             modalities=['text'],  # 只要文本！
-            stream=False
+            stream=False  # 需要完整 JSON 才能解析 message 和 actions
         )
 
         text_response = understanding_response.choices[0].message.content
         print(f'📝 AI 文本响应 (前200字符): {text_response[:200]}...')
         print(f'📝 完整响应长度: {len(text_response)} 字符')
+        print(f'⏱️  视频理解完成，立即开始 TTS 流式合成...')
 
         # 尝试解析 JSON（如果 system_prompt 要求返回 JSON）
         tts_text = text_response
@@ -1168,16 +1171,30 @@ def video_auto_chat_with_tts():
         def generate_audio_stream():
             """流式生成音频并返回 WAV 数据（累积后添加 WAV header）"""
             try:
-                # 调用 Qwen3-TTS 流式 API
+                # ✅ 第一步：先发送 JSON 元数据块（包含 actions 和 message）
+                metadata = {
+                    'type': 'metadata',
+                    'message': tts_text,
+                    'actions': actions
+                }
+                metadata_json = json.dumps(metadata, ensure_ascii=False)
+                metadata_bytes = metadata_json.encode('utf-8')
+
+                # 发送元数据长度（4字节）+ 元数据内容
+                metadata_length = len(metadata_bytes)
+                yield metadata_length.to_bytes(4, byteorder='big')  # 长度前缀
+                yield metadata_bytes  # JSON 数据
+
+                print(f'📋 已发送元数据块: {len(actions)} 个 actions, 消息长度 {len(tts_text)} 字符')
+
+                # ✅ 第二步：调用 Qwen3-TTS 流式 API 生成音频
+                # 注意：Qwen3-TTS 使用 text 参数，不是 messages
                 responses = dashscope.MultiModalConversation.call(
                     model="qwen3-tts-flash",
-                    messages=[{
-                        'role': 'user',
-                        'content': [{'text': tts_text}]
-                    }],
-                    voice_selection="Cherry",
+                    text=tts_text,  # ✅ 直接传 text 参数！
+                    voice="Cherry",
                     language_type="Chinese",
-                    stream=True  # ✅ 流式生成！
+                    stream=True
                 )
 
                 chunk_count = 0
@@ -1221,14 +1238,12 @@ def video_auto_chat_with_tts():
                 print(f'❌ TTS 生成失败: {e}')
                 traceback.print_exc()
 
-        # 返回流式 PCM 音频
+        # 返回流式数据：先发送元数据块，再发送音频流
         return Response(
             generate_audio_stream(),
             mimetype='application/octet-stream',
             headers={
                 'Content-Type': 'application/octet-stream',
-                'X-Audio-Format': 'pcm',  # 告诉前端这是 PCM 格式
-                'X-Sample-Rate': '24000',  # Qwen3-TTS 默认采样率
                 'Cache-Control': 'no-cache'
             }
         )

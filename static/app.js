@@ -656,26 +656,75 @@ async function handleVideoCapture(videoGroups) {
             throw new Error(`请求失败: ${response.status} - ${errorText}`);
         }
 
-        console.log('✅ 开始接收流式音频');
-        showStatus('数字人正在说话...', 'success');
+        console.log('✅ 开始接收流式数据（元数据 + 音频）');
+        showStatus('正在接收 AI 响应...', 'info');
 
-        // 创建音频流生成器（原始 HTTP 流）
+        // 创建音频流生成器（解析元数据块 + 音频流）
         async function* rawAudioStream() {
             const reader = response.body.getReader();
-            let chunkCount = 0;
+            let buffer = new Uint8Array(0);
+            let metadataParsed = false;
+            let audioChunkCount = 0;
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) {
-                    console.log(`✅ 流式接收完成，共 ${chunkCount} 个片段`);
+                    console.log(`✅ 流式接收完成，共 ${audioChunkCount} 个音频片段`);
                     break;
                 }
 
-                chunkCount++;
-                console.log(`🔊 收到 HTTP 片段 #${chunkCount}:`, value.byteLength, 'bytes');
+                // 将新数据追加到缓冲区
+                const newBuffer = new Uint8Array(buffer.length + value.length);
+                newBuffer.set(buffer);
+                newBuffer.set(value, buffer.length);
+                buffer = newBuffer;
 
-                // 返回 ArrayBuffer
-                yield value.buffer;
+                // 第一步：解析元数据块（只解析一次）
+                if (!metadataParsed && buffer.length >= 4) {
+                    // 读取元数据长度（4字节，big-endian）
+                    const metadataLength = (buffer[0] << 24) | (buffer[1] << 16) | (buffer[2] << 8) | buffer[3];
+                    console.log(`📋 [DEBUG] 元数据长度: ${metadataLength} bytes`);
+
+                    // 检查是否已接收完整的元数据
+                    if (buffer.length >= 4 + metadataLength) {
+                        // 提取元数据
+                        const metadataBytes = buffer.slice(4, 4 + metadataLength);
+                        const metadataJson = new TextDecoder().decode(metadataBytes);
+                        const metadata = JSON.parse(metadataJson);
+
+                        console.log('📋 [INFO] 收到元数据:', metadata);
+                        console.log('💬 [INFO] AI 消息:', metadata.message);
+                        console.log('📋 [INFO] Actions:', metadata.actions);
+
+                        // 处理 actions
+                        if (metadata.actions && metadata.actions.length > 0) {
+                            metadata.actions.forEach(action => {
+                                console.log(`  ✅ Action: ${action.type}`, action);
+                                // TODO: 根据 action.type 执行相应操作
+                            });
+                        }
+
+                        // 显示消息到聊天记录
+                        addChatMessage('avatar', metadata.message);
+
+                        // 移除元数据，剩下的都是音频数据
+                        buffer = buffer.slice(4 + metadataLength);
+                        metadataParsed = true;
+
+                        console.log('✅ 元数据解析完成，开始接收音频流');
+                        showStatus('数字人正在说话...', 'success');
+                    }
+                }
+
+                // 第二步：返回音频数据（元数据解析后）
+                if (metadataParsed && buffer.length > 0) {
+                    audioChunkCount++;
+                    console.log(`🔊 收到音频片段 #${audioChunkCount}:`, buffer.byteLength, 'bytes');
+
+                    // 返回音频 ArrayBuffer
+                    yield buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+                    buffer = new Uint8Array(0);  // 清空缓冲区
+                }
             }
         }
 
