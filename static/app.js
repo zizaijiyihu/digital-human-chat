@@ -526,7 +526,7 @@ async function toggleVideoCallMode() {
             console.log('🔧 [DEBUG] 调用 avatar.enableVideoAutoCapture...');
             await avatar.enableVideoAutoCapture({
                 // 视频录制配置
-                maxGroups: 2,                   // 保留 2 组背景视频
+                maxGroups: 1,                   // 保留 1 组背景视频（5秒）
                 groupDuration: 5000,            // 每组 5 秒
                 maxRecordDuration: 60000,       // 最长录制 60 秒
 
@@ -640,10 +640,10 @@ async function handleVideoCapture(videoGroups) {
             formData.append('videos', videoGroups[0].blob, 'video.webm');
         }
 
-        // 调用视频对话 API
-        console.log('🌐 [DEBUG] 准备发送 POST 请求到 /api/video-auto-chat');
+        // 调用新的流式 TTS API
+        console.log('🌐 [DEBUG] 准备发送 POST 请求到 /api/video-auto-chat-with-tts');
 
-        const response = await fetch('/api/video-auto-chat', {
+        const response = await fetch('/api/video-auto-chat-with-tts', {
             method: 'POST',
             body: formData
         });
@@ -705,8 +705,169 @@ async function handleVideoCapture(videoGroups) {
     } catch (error) {
         console.error('❌ 处理视频采集失败:', error);
         showStatus('处理失败: ' + error.message, 'error');
+    } finally {
+        // 无论成功还是失败，都尝试加载最新视频到预览区域
+        loadLatestVideos();
     }
 }
+
+// ========== 视频预览功能 ==========
+
+/**
+ * 加载最新的视频到预览区域
+ */
+async function loadLatestVideos() {
+    try {
+        console.log('🎬 加载最新视频...');
+
+        const response = await fetch('/api/latest-videos');
+        const data = await response.json();
+
+        if (data.error) {
+            console.log('ℹ️ 暂无视频');
+            return;
+        }
+
+        console.log('✅ 收到视频数据:', data);
+
+        // 显示原始片段
+        const segmentContainer = document.getElementById('segmentVideos');
+        segmentContainer.innerHTML = ''; // 清空现有内容
+
+        if (data.segments && data.segments.length > 0) {
+            data.segments.forEach((segment, index) => {
+                const videoItem = document.createElement('div');
+                videoItem.className = 'video-item';
+
+                // 类型标签样式
+                const typeLabel = segment.type === 'before-speaking' ?
+                    '<span style="color: #8b5cf6;">🔵 背景片段</span>' :
+                    segment.type === 'speaking' ?
+                    '<span style="color: #10b981;">🔴 说话片段</span>' :
+                    '<span style="color: #6b7280;">⚪ 未知</span>';
+
+                videoItem.innerHTML = `
+                    <h4>片段 ${index + 1} - ${typeLabel}</h4>
+                    <video controls>
+                        <source src="${segment.url}" type="video/mp4">
+                        您的浏览器不支持视频播放
+                    </video>
+                `;
+                segmentContainer.appendChild(videoItem);
+            });
+        } else {
+            segmentContainer.innerHTML = '<p class="empty-hint">暂无视频片段</p>';
+        }
+
+        // 显示合并后的视频
+        const mergedContainer = document.getElementById('mergedVideo');
+        mergedContainer.innerHTML = ''; // 清空现有内容
+
+        if (data.merged) {
+            const videoItem = document.createElement('div');
+            videoItem.className = 'video-item';
+            videoItem.innerHTML = `
+                <h4>合并后的完整视频</h4>
+                <video controls>
+                    <source src="${data.merged.url}" type="video/mp4">
+                    您的浏览器不支持视频播放
+                </video>
+            `;
+            mergedContainer.appendChild(videoItem);
+        } else {
+            mergedContainer.innerHTML = '<p class="empty-hint">暂无合并视频</p>';
+        }
+
+        console.log('✅ 视频加载完成');
+
+    } catch (error) {
+        console.error('❌ 加载视频失败:', error);
+    }
+}
+
+// ========== 系统设置功能 ==========
+
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsModal = document.getElementById('settingsModal');
+const closeSettings = document.getElementById('closeSettings');
+const cancelSettings = document.getElementById('cancelSettings');
+const saveSettings = document.getElementById('saveSettings');
+const systemPromptInput = document.getElementById('systemPrompt');
+
+/**
+ * 打开设置弹窗
+ */
+async function openSettings() {
+    try {
+        // 加载当前的系统提示词
+        const response = await fetch('/api/system-prompt');
+        const data = await response.json();
+
+        systemPromptInput.value = data.prompt || '';
+        settingsModal.style.display = 'flex';
+
+        console.log('✅ 设置弹窗已打开');
+    } catch (error) {
+        console.error('❌ 加载系统提示词失败:', error);
+        showStatus('加载设置失败', 'error');
+    }
+}
+
+/**
+ * 关闭设置弹窗
+ */
+function closeSettingsModal() {
+    settingsModal.style.display = 'none';
+}
+
+/**
+ * 保存设置
+ */
+async function saveSystemSettings() {
+    try {
+        const prompt = systemPromptInput.value.trim();
+
+        if (!prompt) {
+            showStatus('提示词不能为空', 'error');
+            return;
+        }
+
+        const response = await fetch('/api/system-prompt', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ prompt })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            showStatus('设置已保存', 'success');
+            closeSettingsModal();
+            console.log('✅ 系统提示词已更新:', data.prompt);
+        } else {
+            throw new Error(data.error || '保存失败');
+        }
+
+    } catch (error) {
+        console.error('❌ 保存设置失败:', error);
+        showStatus('保存失败: ' + error.message, 'error');
+    }
+}
+
+// 设置按钮事件
+settingsBtn.addEventListener('click', openSettings);
+closeSettings.addEventListener('click', closeSettingsModal);
+cancelSettings.addEventListener('click', closeSettingsModal);
+saveSettings.addEventListener('click', saveSystemSettings);
+
+// 点击弹窗外部关闭
+settingsModal.addEventListener('click', (e) => {
+    if (e.target === settingsModal) {
+        closeSettingsModal();
+    }
+});
 
 // 视频通话按钮事件
 videoCallBtn.addEventListener('click', toggleVideoCallMode);

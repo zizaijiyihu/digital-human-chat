@@ -9,8 +9,10 @@ import json
 from pathlib import Path
 from flask import Flask, request, jsonify, send_from_directory, send_file, Response
 from openai import OpenAI
+import dashscope
 import tempfile
 import subprocess
+import traceback
 
 app = Flask(__name__, static_folder='static')
 
@@ -30,9 +32,38 @@ AUDIO_FORMAT = os.getenv('AUDIO_FORMAT', 'wav')
 # OpenAI 客户端
 client = OpenAI(api_key=API_KEY, base_url=API_BASE)
 
+# 配置 DashScope SDK
+dashscope.api_key = API_KEY
+dashscope.base_http_api_url = API_BASE.replace('/compatible-mode/v1', '/api/v1')
+
 # 确保目录存在
 Path('test/videos').mkdir(parents=True, exist_ok=True)
 Path('test/audios').mkdir(parents=True, exist_ok=True)
+Path('static/videos').mkdir(parents=True, exist_ok=True)
+
+
+# 全局变量：系统提示词（从文件加载）
+def load_system_prompt():
+    """从 system_prompt.md 文件加载系统提示词"""
+    prompt_file = Path('system_prompt.md')
+    if prompt_file.exists():
+        with open(prompt_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+            print(f'✅ 已加载系统提示词文件: {prompt_file} ({len(content)} 字符)')
+            return content
+    else:
+        default_prompt = "你是一个友好、专业的AI助手。请仔细观看用户的视频，理解其中的内容和问题，用清晰、自然的语气回复。"
+        print(f'⚠️ 未找到 system_prompt.md，使用默认提示词')
+        return default_prompt
+
+system_prompt = load_system_prompt()
+
+# 视频保存记录
+latest_videos = {
+    'segments': [],
+    'merged': None,
+    'timestamp': None
+}
 
 
 def convert_webm_to_mp4(webm_data):
@@ -997,10 +1028,279 @@ def chat():
         }), 500
 
 
+@app.route('/api/video-auto-chat-with-tts', methods=['POST'])
+def video_auto_chat_with_tts():
+    """
+    视频理解 + 流式 TTS 合成
+    分离式架构：视频理解（纯文本）+ Qwen3-TTS 流式合成
+    """
+    try:
+        print('\n' + '='*80)
+        print('🎯 收到视频理解 + 流式 TTS 请求')
+        print('='*80)
+
+        # 1. 获取并合并视频片段（复用现有逻辑）
+        video_files = request.files.getlist('videos')
+        if not video_files:
+            return jsonify({'error': '缺少视频文件'}), 400
+
+        print(f'📦 收到 {len(video_files)} 个视频片段')
+
+        # 合并视频（与现有 video_auto_chat 相同的逻辑）
+        if len(video_files) == 1:
+            print('📹 单个视频片段，转换为 MP4')
+            webm_data = video_files[0].read()
+            video_data = convert_webm_to_mp4(webm_data)
+            video_mime = 'video/mp4'
+        else:
+            print(f'🔀 多个视频片段，开始合并 {len(video_files)} 个片段')
+            temp_webm_files = []
+            temp_mp4_files = []
+
+            for i, video_file in enumerate(video_files):
+                webm_data = video_file.read()
+                with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as f:
+                    f.write(webm_data)
+                    temp_webm_files.append(f.name)
+
+            # 转换所有 WebM 为 MP4
+            for i, webm_path in enumerate(temp_webm_files):
+                mp4_path = webm_path.replace('.webm', '.mp4')
+                try:
+                    subprocess.run([
+                        'ffmpeg', '-y', '-i', webm_path,
+                        '-vcodec', 'libx264', '-acodec', 'aac',
+                        '-preset', 'ultrafast', '-crf', '28',
+                        mp4_path
+                    ], check=True, capture_output=True, text=True)
+                    temp_mp4_files.append(mp4_path)
+                except subprocess.CalledProcessError:
+                    print(f'  ⚠️ 跳过损坏的片段 {i+1}')
+                    continue
+
+            if not temp_mp4_files:
+                raise Exception('所有视频片段都转换失败')
+
+            # 创建 concat 文件并合并
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as concat_file:
+                for mp4_path in temp_mp4_files:
+                    concat_file.write(f"file '{mp4_path}'\n")
+                concat_file_path = concat_file.name
+
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as output_file:
+                output_path = output_file.name
+
+            subprocess.run([
+                'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+                '-i', concat_file_path, '-c', 'copy', output_path
+            ], check=True, capture_output=True, text=True)
+
+            with open(output_path, 'rb') as f:
+                video_data = f.read()
+                video_mime = 'video/mp4'
+
+            # 清理临时文件
+            for path in temp_webm_files + temp_mp4_files + [concat_file_path, output_path]:
+                try:
+                    os.unlink(path)
+                except:
+                    pass
+
+        # 2. 视频理解（只获取文本）
+        video_base64 = base64.b64encode(video_data).decode('utf-8')
+
+        print('\n' + '='*80)
+        print('📤 发送给大模型的完整请求（视频理解）')
+        print('='*80)
+        print(f'🤖 Model: {MODEL}')
+        print(f'📊 Modalities: [text]')
+        print(f'📹 Video: {video_mime}, {len(video_data)} bytes ({len(video_data) / 1024 / 1024:.2f} MB)')
+        print(f'\n📝 Messages:')
+        print(f'  [1] Role: system')
+        print(f'      Content (前200字符):')
+        print(f'      {system_prompt[:200]}...')
+        print(f'      (总长度: {len(system_prompt)} 字符)')
+        print(f'  [2] Role: user')
+        print(f'      Content: [video] data:{video_mime};base64,...(base64 {len(video_base64)} 字符)')
+        print('='*80 + '\n')
+
+        print('⏳ 步骤 1: 调用 Qwen3-Omni-Flash 进行视频理解（纯文本模式）...')
+
+        understanding_response = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {'role': 'system', 'content': system_prompt},
+                {
+                    'role': 'user',
+                    'content': [
+                        {
+                            'type': 'video_url',
+                            'video_url': {'url': f'data:{video_mime};base64,{video_base64}'}
+                        }
+                    ]
+                }
+            ],
+            modalities=['text'],  # 只要文本！
+            stream=False
+        )
+
+        text_response = understanding_response.choices[0].message.content
+        print(f'📝 AI 文本响应 (前200字符): {text_response[:200]}...')
+        print(f'📝 完整响应长度: {len(text_response)} 字符')
+
+        # 尝试解析 JSON（如果 system_prompt 要求返回 JSON）
+        tts_text = text_response
+        actions = []
+        try:
+            response_json = json.loads(text_response)
+            if 'message' in response_json:
+                tts_text = response_json.get('message', text_response)
+            if 'actions' in response_json:
+                actions = response_json.get('actions', [])
+                print(f'📋 解析到的 actions: {actions}')
+        except json.JSONDecodeError:
+            print('📝 响应不是 JSON 格式，直接使用文本')
+
+        # 3. 流式 TTS 合成
+        print(f'\n⏳ 步骤 2: 调用 Qwen3-TTS-Flash 进行流式音频合成...')
+        print(f'🎵 TTS 文本 (前100字符): {tts_text[:100]}...')
+
+        def generate_audio_stream():
+            """流式生成音频并返回 WAV 数据（累积后添加 WAV header）"""
+            try:
+                # 调用 Qwen3-TTS 流式 API
+                responses = dashscope.MultiModalConversation.call(
+                    model="qwen3-tts-flash",
+                    messages=[{
+                        'role': 'user',
+                        'content': [{'text': tts_text}]
+                    }],
+                    voice_selection="Cherry",
+                    language_type="Chinese",
+                    stream=True  # ✅ 流式生成！
+                )
+
+                chunk_count = 0
+                pcm_buffer = b''
+                MIN_CHUNK_SIZE = 24000  # 24KB (约 0.5 秒音频，与旧接口一致)
+
+                for response in responses:
+                    if response.status_code == 200:
+                        audio = response.output.get('audio', {})
+                        if audio and audio.data:
+                            # DashScope 返回 base64 编码的 PCM 数据
+                            pcm_chunk = base64.b64decode(audio.data)
+                            pcm_buffer += pcm_chunk
+                            print(f'  🔊 TTS 累积音频: +{len(pcm_chunk)} bytes, 总计: {len(pcm_buffer)} bytes')
+
+                            # 当缓冲区达到最小大小时，返回一个完整的 WAV 块
+                            if len(pcm_buffer) >= MIN_CHUNK_SIZE:
+                                chunk_count += 1
+                                wav_chunk = add_wav_header(pcm_buffer, sample_rate=24000)
+                                print(f'  ✅ 返回 TTS 音频块 #{chunk_count}: {len(wav_chunk)} bytes')
+                                yield wav_chunk
+                                pcm_buffer = b''
+
+                        if response.output.get('finish_reason') == 'stop':
+                            print(f'✅ TTS 流式生成完成')
+                            break
+                    else:
+                        print(f'❌ TTS 错误: {response.message}')
+                        break
+
+                # 返回剩余的音频数据
+                if pcm_buffer:
+                    chunk_count += 1
+                    wav_chunk = add_wav_header(pcm_buffer, sample_rate=24000)
+                    print(f'  ✅ 返回最后的 TTS 音频块 #{chunk_count}: {len(wav_chunk)} bytes')
+                    yield wav_chunk
+
+                print(f'🎵 TTS 总共返回 {chunk_count} 个 WAV 音频块')
+
+            except Exception as e:
+                print(f'❌ TTS 生成失败: {e}')
+                traceback.print_exc()
+
+        # 返回流式 PCM 音频
+        return Response(
+            generate_audio_stream(),
+            mimetype='application/octet-stream',
+            headers={
+                'Content-Type': 'application/octet-stream',
+                'X-Audio-Format': 'pcm',  # 告诉前端这是 PCM 格式
+                'X-Sample-Rate': '24000',  # Qwen3-TTS 默认采样率
+                'Cache-Control': 'no-cache'
+            }
+        )
+
+    except Exception as e:
+        print(f'❌ 处理失败: {e}')
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/system-prompt', methods=['GET'])
+def get_system_prompt():
+    """获取当前的系统提示词"""
+    global system_prompt
+    return jsonify({'prompt': system_prompt})
+
+
+@app.route('/api/system-prompt', methods=['POST'])
+def update_system_prompt():
+    """更新系统提示词"""
+    global system_prompt
+    try:
+        data = request.get_json()
+        if not data or 'prompt' not in data:
+            return jsonify({'error': '缺少 prompt 参数'}), 400
+
+        new_prompt = data['prompt'].strip()
+        if not new_prompt:
+            return jsonify({'error': '提示词不能为空'}), 400
+
+        system_prompt = new_prompt
+        print(f'✅ 系统提示词已更新 (长度: {len(system_prompt)} 字符)')
+
+        return jsonify({'success': True, 'prompt': system_prompt})
+    except Exception as e:
+        print(f'❌ 更新系统提示词失败: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/latest-videos', methods=['GET'])
+def get_latest_videos():
+    """获取最新保存的视频文件信息"""
+    global latest_videos
+
+    if not latest_videos['segments'] and not latest_videos['merged']:
+        return jsonify({'error': '暂无视频', 'segments': [], 'merged': None})
+
+    result = {
+        'segments': [
+            {
+                'filename': segment['filename'],
+                'url': f'/static/videos/{segment["filename"]}',
+                'type': segment['type'],
+                'original_name': segment['original_name']
+            }
+            for segment in latest_videos['segments']
+        ],
+        'merged': {
+            'filename': latest_videos['merged'],
+            'url': f'/static/videos/{latest_videos["merged"]}'
+        } if latest_videos['merged'] else None,
+        'timestamp': latest_videos['timestamp']
+    }
+
+    return jsonify(result)
+
+
 if __name__ == '__main__':
     print('🚀 数字人对话系统启动！')
     print(f'📡 访问地址: http://localhost:5001')
     print(f'🤖 使用模型: {MODEL}')
     print(f'🎵 音频格式: {AUDIO_FORMAT.upper()} {"(快速)" if AUDIO_FORMAT == "wav" else "(兼容)"}')
+    print(f'💬 系统提示词: 已加载 ({len(system_prompt)} 字符)')
 
     app.run(host='0.0.0.0', port=5001, debug=True)

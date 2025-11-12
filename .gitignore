@@ -49,3 +49,4 @@ test/videos/*
 # 数字人组件 (使用 git submodule)
 # 如果不使用 submodule，则不需要忽略
 # digital-human-component/
+static/videos/

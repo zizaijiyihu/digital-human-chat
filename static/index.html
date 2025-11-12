@@ -35,6 +35,9 @@
                         🖼️ 上传图片点评
                         <input type="file" id="imageUpload" accept="image/*" style="display:none;">
                     </label>
+                    <button id="settingsBtn" class="btn btn-settings">
+                        ⚙️ 系统设置
+                    </button>
                 </div>
                 <div id="imagePreview" class="image-preview" style="display:none;">
                     <img id="previewImg" src="" alt="预览图片">
@@ -58,6 +61,52 @@
             <h2>💬 对话记录</h2>
             <div id="chatLog" class="chat-log">
                 <p class="empty-hint">开始对话后，对话记录将显示在这里</p>
+            </div>
+        </div>
+
+        <!-- 视频预览区域 -->
+        <div class="video-preview-section">
+            <h2>🎬 视频预览（调试用）</h2>
+            <div class="video-preview-container">
+                <div class="video-group">
+                    <h3>原始视频片段</h3>
+                    <div id="segmentVideos" class="segment-videos">
+                        <p class="empty-hint">使用视频通话模式后，这里会显示原始视频片段</p>
+                    </div>
+                </div>
+                <div class="video-group">
+                    <h3>拼接后的视频</h3>
+                    <div id="mergedVideo" class="merged-video">
+                        <p class="empty-hint">使用视频通话模式后，这里会显示合并后的视频</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 系统设置弹窗 -->
+    <div id="settingsModal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>⚙️ 系统设置</h2>
+                <button class="modal-close" id="closeSettings">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="setting-item">
+                    <label for="systemPrompt">系统提示词：</label>
+                    <textarea
+                        id="systemPrompt"
+                        class="prompt-textarea"
+                        rows="5"
+                        placeholder="请输入系统提示词..."></textarea>
+                    <div class="setting-hint">
+                        💡 提示：系统提示词会在每次视频通话时发送给 AI，用于指导 AI 的回复风格和内容。
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="saveSettings" class="btn btn-primary">💾 保存设置</button>
+                <button id="cancelSettings" class="btn btn-secondary">取消</button>
             </div>
         </div>
     </div>

@@ -147,6 +147,18 @@ h2 {
     box-shadow: 0 5px 15px rgba(139, 92, 246, 0.4);
 }
 
+.btn-settings {
+    background: #64748b;
+    color: white;
+    min-width: 150px;
+}
+
+.btn-settings:hover {
+    background: #475569;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(100, 116, 139, 0.4);
+}
+
 .btn-video-call {
     background: #06b6d4;
     color: white;
@@ -328,5 +340,230 @@ h2 {
 
     .main-content {
         grid-template-columns: 1fr;
+    }
+}
+
+/* 视频预览区域 */
+.video-preview-section {
+    background: white;
+    border-radius: 15px;
+    padding: 25px;
+    margin-top: 30px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+}
+
+.video-preview-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+    margin-top: 20px;
+}
+
+.video-group h3 {
+    font-size: 1.1em;
+    color: #374151;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #e5e7eb;
+}
+
+.segment-videos {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.video-item {
+    background: #f9fafb;
+    border-radius: 10px;
+    padding: 15px;
+    border: 2px solid #e5e7eb;
+    transition: all 0.3s ease;
+}
+
+.video-item:hover {
+    border-color: #8b5cf6;
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);
+}
+
+.video-item h4 {
+    font-size: 0.9em;
+    color: #6b7280;
+    margin-bottom: 10px;
+}
+
+.video-item video {
+    width: 100%;
+    border-radius: 8px;
+    background: #000;
+}
+
+.merged-video .video-item video {
+    max-width: 100%;
+    height: auto;
+}
+
+/* 设置弹窗 */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(5px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-content {
+    background: white;
+    border-radius: 20px;
+    width: 90%;
+    max-width: 600px;
+    max-height: 90vh;
+    overflow: auto;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    animation: modalSlideIn 0.3s ease-out;
+}
+
+@keyframes modalSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-50px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 25px;
+    border-bottom: 2px solid #e5e7eb;
+}
+
+.modal-header h2 {
+    margin: 0;
+    color: #1f2937;
+    font-size: 1.5em;
+}
+
+.modal-close {
+    background: #f3f4f6;
+    border: none;
+    width: 35px;
+    height: 35px;
+    border-radius: 50%;
+    font-size: 1.3em;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: #6b7280;
+}
+
+.modal-close:hover {
+    background: #e5e7eb;
+    transform: rotate(90deg);
+}
+
+.modal-body {
+    padding: 25px;
+}
+
+.setting-item {
+    margin-bottom: 20px;
+}
+
+.setting-item label {
+    display: block;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 10px;
+    font-size: 1.1em;
+}
+
+.prompt-textarea {
+    width: 100%;
+    padding: 15px;
+    border: 2px solid #e5e7eb;
+    border-radius: 10px;
+    font-size: 1em;
+    font-family: inherit;
+    resize: vertical;
+    transition: all 0.2s;
+}
+
+.prompt-textarea:focus {
+    outline: none;
+    border-color: #8b5cf6;
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+}
+
+.setting-hint {
+    margin-top: 8px;
+    padding: 10px;
+    background: #f0f9ff;
+    border-left: 3px solid #3b82f6;
+    border-radius: 5px;
+    font-size: 0.9em;
+    color: #1e40af;
+}
+
+.modal-footer {
+    padding: 20px 25px;
+    border-top: 2px solid #e5e7eb;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.btn-primary {
+    background: #8b5cf6;
+    color: white;
+    padding: 12px 30px;
+    border: none;
+    border-radius: 10px;
+    font-size: 1em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-primary:hover {
+    background: #7c3aed;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(139, 92, 246, 0.4);
+}
+
+.btn-secondary {
+    background: #e5e7eb;
+    color: #374151;
+    padding: 12px 30px;
+    border: none;
+    border-radius: 10px;
+    font-size: 1em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-secondary:hover {
+    background: #d1d5db;
+}
+
+/* 响应式 */
+@media (max-width: 1024px) {
+    .video-preview-container {
+        grid-template-columns: 1fr;
+    }
+
+    .modal-content {
+        width: 95%;
+        max-height: 95vh;
     }
 }
